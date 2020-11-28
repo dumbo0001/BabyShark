@@ -1,9 +1,8 @@
 
  
 #include "pitches.h"
-
-// Utility macro
-#define adc_disable() (ADCSRA &= ~(1<<ADEN)) // disable ADC (before power-off)
+#include <avr/sleep.h>
+#include <avr/interrupt.h>
 
 //notes in the melody:
 int melody[] = {
@@ -39,12 +38,10 @@ const int LED_PIN = 3;
 const int TILT_SENSOR = 2;
 const int PIEZO = 4;
 
-int tiltState = LOW;
 unsigned long tonePreviousMillis = 0;
 
 int toneState = 0;
 int thisNote = 0;
-int isStartup = 1;
 
 void setup(){  
   pinMode(PIEZO, OUTPUT);
@@ -55,31 +52,48 @@ void setup(){
   pinMode(0, INPUT_PULLUP);
   pinMode(1, INPUT_PULLUP);
 
-  adc_disable();
+  // Flash quick sequence so we know setup has started
+  for (int k = 0; k < 10; k = k + 1) {
+    if (k % 2 == 0) {
+      digitalWrite(LED_PIN, HIGH);
+    } else {
+      digitalWrite(LED_PIN, LOW);
+    }
+    delay(250);
+  } // for
+}
+
+void sleep() {
+  GIMSK |= _BV(PCIE);                     // Enable Pin Change Interrupts
+  PCMSK |= _BV(PCINT2);                   // Use PB2 as interrupt pin
+  ADCSRA &= ~_BV(ADEN);                   // ADC off
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);    // replaces above statement
+
+  sleep_enable();                         // Sets the Sleep Enable bit in the MCUCR Register (SE BIT)
+  sei();                                  // Enable interrupts
+  sleep_cpu();                            // sleep
+
+  cli();                                  // Disable interrupts
+  PCMSK &= ~_BV(PCINT2);                  // Turn off PB2 as interrupt pin
+  sleep_disable();                        // Clear SE bit
+  ADCSRA |= _BV(ADEN);                    // ADC on
+
+  sei();                                  // Enable interrupts
+} // sleep
+
+ISR(PCINT0_vect) {
+  // This is called when the interrupt occurs, but I don't need to do anything in it
 }
 
 void loop(){
-  int val = digitalRead(TILT_SENSOR);
-  
-  if (isStartup == 1) {
-    // prevent playing tone on power up
-    tiltState = val;
-    isStartup = 0;
+  if (toneState == 0) {
+    sleep();
   }
-
-  if (tiltState != val) {
-    tiltState = val;
-    if (toneState == 0) {
-      toneState = 1;  
-    }
-  }
-
-  if (toneState == 1) {
-    playTone();
-  }
+  playTone();
 }
 
 void playTone() {
+  toneState =1;
   if (thisNote < sizeof(melody) / sizeof(melody[0])) {
     unsigned long currentMillis = millis();
     
@@ -114,6 +128,6 @@ void playTone() {
   } else {
     toneState = 0;
     thisNote = 0;
-    tiltState = digitalRead(TILT_SENSOR);
+    delay(10000);
   }
 }
